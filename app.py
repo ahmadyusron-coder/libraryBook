@@ -1,12 +1,19 @@
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
+from flask_login import LoginManager, login_user, logout_user, login_required
+
+
 
 app = Flask(__name__)
 
 app.config['SECRET_KEY'] = 'secret'
 app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:123@localhost/library'
 db = SQLAlchemy(app)
+
+
+login_manager = LoginManager()
+login_manager.init_app(app)
 
 migrate = Migrate(app, db)
 
@@ -81,6 +88,33 @@ class TransactionBook(db.Model):
 
     def __repr__(self):
         return f"<TransactionBook {self.id}>"
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
+
+#login
+@app.route('/login/', methods=['POST'])
+def login():
+    username = request.form['username']
+    password = request.form['password']
+
+    user = User.query.filter_by(username=username, password=password).first()
+    if user:
+        login_user(user)
+        return jsonify({'message': 'Login successful'}), 200
+    else:
+        return jsonify({'message': 'Login failed'}), 401
+
+
+# logout
+@app.route('/logout/', methods=['GET'])
+@login_required
+def logout():
+    logout_user()
+    return jsonify({'message': 'Logout successful'}), 200
+
 
 
 @app.route('/user/', methods=['GET'])
@@ -386,13 +420,51 @@ def delete_transaction(id):
     else:
         return{'message':'Delete Not Completed'}
 
-@app.route('/transcationbook/', methods=['GET'])
+@app.route('/transactionbook/', methods=['GET'])
 def get_transactionbook():
     data = [{
-
+            'id': data.id,
+            'id_transaction' : data.id_transaction,
+            'id_book': data.id_book,
+            'return_date': data.return_date
 
             } for data in TransactionBook.query.all()
     ]
+    return jsonify(data)
 
+@app.route('/transactionbook/', methods=['POST'])
+def create_transactionbook():
+    data = TransactionBook(
+        id_transaction=request.form['id_transaction'],
+        id_book=request.form['id_book'],
+        return_date=request.form['return_date']
+    )
+    db.session.add(data)
+    db.session.commit()
+    return{'message': 'Succesfully Transaction Book'}
+
+@app.route('/transactionbook/<id>', methods=['PUT'])
+def update_transactionbook(id):
+    data = TransactionBook.query.get(id)
+    if data:
+        data.id_transaction=request.form['id_transaction'],
+        data.id_book=request.form['id_book'],
+        data.return_date=request.form['return_date']
+        db.session.commit()
+        return {'message':'Update Completed'}
+    else:
+        return {'message':'Update Not Completed'}
+
+@app.route('/transactionbook/<id>', methods=['DELETE'])
+def delete_transactionbook(id):
+    data = TransactionBook.query.get(id)
+    if data:
+        db.session.delete(data)
+        db.session.commit()
+        return {'message':'Delete Completed'}
+    else:
+        return {'message':'Delete Not Completed'}
+    
+    
 if __name__ == '__main__':
 	app.run(debug=True)
