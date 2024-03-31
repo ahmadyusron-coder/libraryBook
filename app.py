@@ -1,16 +1,19 @@
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
-from flask_login import LoginManager, login_user, logout_user, login_required
-
-
+from flask_login import LoginManager, login_user, logout_user, login_required, current_user
+# from passlib.context import CryptContext
+from flask_bcrypt import Bcrypt
+from werkzeug.security import check_password_hash, generate_password_hash
+from datetime import datetime
 
 app = Flask(__name__)
 
 app.config['SECRET_KEY'] = 'secret'
 app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:123@localhost/library'
 db = SQLAlchemy(app)
-
+# pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+bcrypt = Bcrypt(app)
 
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -58,13 +61,19 @@ class BookWriter(db.Model):
 
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(255))
+    username = db.Column(db.String(255), unique=True)
     password = db.Column(db.String(255))
     user_type = db.Column(db.String(255))
 
     def __repr__(self):
         return f"<User {self.username}>"
-    
+    def is_active(self):
+        return True
+    def get_id(self):
+        return self.id
+    def is_authenticated(self):
+        return True
+
 class Transaction(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     id_admin = db.Column(db.Integer, db.ForeignKey('user.id'))
@@ -91,17 +100,22 @@ class TransactionBook(db.Model):
 
 
 @login_manager.user_loader
-def load_user(user_id):
-    return User.query.get(int(user_id))
+def load_user(id):
+    return User.query.get(int(id))
 
 #login
 @app.route('/login/', methods=['POST'])
 def login():
+    if current_user.is_authenticated:
+        return {'message':'Anda perlu logout dahulu'}
     username = request.form['username']
     password = request.form['password']
 
-    user = User.query.filter_by(username=username, password=password).first()
-    if user:
+    # username = request.headers.get('username')
+    # password = request.headers.get('password')
+    
+    user = User.query.filter_by(username=username).first()
+    if user and (user.password, password):
         login_user(user)
         return jsonify({'message': 'Login successful'}), 200
     else:
@@ -124,7 +138,7 @@ def get_user():
             'username': data.username,
             'user_type': data.user_type,
             'password': data.password
-            } for data in User.query.all()
+            } for data in User.query.order_by(User.id.desc()).all()
         ])
 
 
@@ -132,9 +146,12 @@ def get_user():
 def create_user():
     data = User(
         username=request.form['username'],
-        password=request.form['password'],
+        password = generate_password_hash(request.form['password']),
+        # password=request.form['password'],
+        
         # user_type='member'
         user_type=request.form['user_type']
+
     )
     db.session.add(data)
     db.session.commit()
@@ -216,17 +233,22 @@ def category_delete(id):
         return {'message':'Delete Not Completed'}
 
 @app.route('/books/', methods=['GET'])
+@login_required
 def get_books():
-    return jsonify([
-        {'id': data.id,
-        'title':data.title,
-        'category_id':data.category_id,
-        'year':data.year,
-        'pages':data.pages
-        } for data in Books.query.all()
-    ])
+    if current_user.user_type == 'admin':
+        return jsonify([
+            {'id': data.id,
+            'title':data.title,
+            'category_id':data.category_id,
+            'year':data.year,
+            'pages':data.pages
+            } for data in Books.query.all()
+        ])
+    else:
+        return {'Message': "Access denied"}
 
 @app.route('/books/', methods=['POST'])
+@login_required
 def create_books():
     data = Books(
         title=request.form['title'],
@@ -309,8 +331,12 @@ def get_bookwriter():
     # data = BookWriter.query.all()
     return jsonify ([
             {'id': data.id,
-            'writer_id': data.writers.id,
-            'name': data.writers.name,
+            'id_books': data.id_books,
+            'id_writer': data.id_writer,
+            'writer':{
+                'writer_id': data.writer.id,
+                'name': data.writer.name
+            },
             'books': {
                 'title': data.book.title,
                 'year': data.book.year if data.book else None,
@@ -465,6 +491,9 @@ def delete_transactionbook(id):
     else:
         return {'message':'Delete Not Completed'}
     
+
+
+
     
 if __name__ == '__main__':
 	app.run(debug=True)
